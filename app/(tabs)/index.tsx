@@ -1,13 +1,29 @@
+import React, { useEffect, useState } from 'react';
 import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { Pressable, StyleSheet, TextInput} from 'react-native';
 
-import { HelloWave } from '@/components/hello-wave';
 import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+
+import { connectToESP32, stopBluetoothScan, sendTextToOLED } from '@/scripts/bluetooth';
 
 export default function HomeScreen() {
+  const [esp32Status, setEsp32Status] = useState('Not connected');
+  const [bluetoothStatus, setBluetoothStatus] = useState('Idle');
+  const [connectedDevice, setConnectedDevice] = useState(null);
+  const [oledText, setOledText] = useState('');
+
+  useEffect(() => {
+    return () => {
+      stopBluetoothScan();
+    };
+  }, []);
+
+  const ConnectToBluetooth = () => {connectToESP32({setBluetoothStatus, setEsp32Status, setConnectedDevice});};
+  const SendTextToOLED = () => {sendTextToOLED({connectedDevice, text: oledText, setBluetoothStatus});
+};
+
   return (
     <ParallaxScrollView
       headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
@@ -16,62 +32,79 @@ export default function HomeScreen() {
           source={require('@/assets/images/partial-react-logo.png')}
           style={styles.reactLogo}
         />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+      }
+    >
+      <ThemedView style={styles.container}>
+        <ThemedView style={styles.titleContainer}>
+          <ThemedText type="title">Smart Coffee Cup</ThemedText>
+        </ThemedView>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
+        <ThemedText type="subtitle">
+          OLED-Bluetooth Connectivity Test
         </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
+
+        <ThemedView style={styles.card}>
+          <ThemedText type="subtitle">Device Status</ThemedText>
+
+          <ThemedText style={styles.statusText}>
+            ESP32: {esp32Status}
+          </ThemedText>
+
+          <ThemedText style={styles.statusText}>
+            OLED Display: Waiting for data
+          </ThemedText>
+
+          <ThemedText style={styles.statusText}>
+            Bluetooth: {bluetoothStatus}
+          </ThemedText>
+
+          {connectedDevice && (
+            <ThemedText style={styles.statusText}>
+              Device connected successfully
+            </ThemedText>
+          )}
+        </ThemedView>
+
+
+        <ThemedView style={styles.inputCard}>
+          <ThemedText type="subtitle">Send Text to OLED</ThemedText>
+
+          <TextInput
+            style={styles.textInput}
+            placeholder="Type OLED message..."
+            placeholderTextColor="#888"
+            value={oledText}
+            onChangeText={setOledText}
+          />
+
+        <Pressable
+            style={({ pressed }) => [
+              styles.button,
+              pressed && styles.buttonPressed,
+            ]}
+            onPress={SendTextToOLED}
+          >
+            <ThemedText style={styles.buttonText}>
+              Send to OLED
+            </ThemedText>
+          </Pressable>
+        </ThemedView>
+
+        <Pressable
+          style={({ pressed }) => [
+            styles.button,
+            pressed && styles.buttonPressed,
+          ]}
+          onPress={ConnectToBluetooth}
+        >
+          <ThemedText style={styles.buttonText}>
+            Connect to ESP32
+          </ThemedText>
+        </Pressable>
+
+        <ThemedText style={styles.noteText}>
+          This screen scans for a BLE device with ESP32 in its name and connects
+          to it.
         </ThemedText>
       </ThemedView>
     </ParallaxScrollView>
@@ -79,15 +112,53 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  container: {
+    gap: 20,
+    paddingBottom: 32,
+  },
+
   titleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+
+  card: {
+    padding: 18,
+    borderRadius: 12,
+    gap: 10,
+    backgroundColor: 'rgba(120, 120, 120, 0.15)',
   },
+
+  statusText: {
+    fontSize: 16,
+  },
+
+  button: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+
+  buttonPressed: {
+    opacity: 0.7,
+    transform: [{ scale: 0.98 }],
+  },
+
+  buttonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+
+  noteText: {
+    fontSize: 14,
+    opacity: 0.75,
+    lineHeight: 20,
+  },
+
   reactLogo: {
     height: 178,
     width: 290,
@@ -95,4 +166,21 @@ const styles = StyleSheet.create({
     left: 0,
     position: 'absolute',
   },
+
+  inputCard: {
+  padding: 18,
+  borderRadius: 12,
+  gap: 12,
+  backgroundColor: 'rgba(120, 120, 120, 0.15)',
+},
+
+textInput: {
+  borderWidth: 1,
+  borderColor: '#999',
+  borderRadius: 10,
+  paddingVertical: 12,
+  paddingHorizontal: 14,
+  fontSize: 16,
+  color: 'white',
+},
 });
