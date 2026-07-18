@@ -7,11 +7,11 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 
 import { connectToESP32, stopBluetoothScan, sendTextToOLED } from '@/scripts/bluetooth';
+import { useBluetooth } from '@/BLEcontext/bluetooth-context';
 
 export default function HomeScreen() {
-  const [esp32Status, setEsp32Status] = useState('Not connected');
-  const [bluetoothStatus, setBluetoothStatus] = useState('Idle');
-  const [connectedDevice, setConnectedDevice] = useState(null);
+  
+  const {esp32Status, setEsp32Status, bluetoothStatus, setBluetoothStatus, connectedDevice, setConnectedDevice} = useBluetooth();
   const [oledText, setOledText] = useState('');
 
   useEffect(() => {

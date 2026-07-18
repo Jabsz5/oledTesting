@@ -9,8 +9,13 @@ const bleManager = new BleManager();
 
 // These must match the UUIDs in your ESP32 code
 export const SMART_CUP_SERVICE_UUID = '12345678-1234-1234-1234-1234567890ab';
-export const OLED_TEXT_CHAR_UUID = 'abcd1234-5678-90ab-cdef-1234567890ab';
 
+export const OLED_TEXT_CHAR_UUID = 'abcd1234-5678-90ab-cdef-1234567890ab';
+export const TEMPERATURE_CHAR_UUID = 'abcd1234-5678-90ab-cdef-1234567890ad';
+export const CAPACITY_CHAR_UUID = 'abcd1234-5678-90ab-cdef-1234567890ae';
+
+const TEMPERATURE_COMMMAND = 5;
+const CAPACITY_COMMAND = 6;
 
 function normalizeUUID(uuid) {
   return uuid?.toLowerCase();
@@ -50,11 +55,7 @@ export async function requestBluetoothPermissions() {
   );
 }
 
-export async function connectToESP32({
-  setBluetoothStatus,
-  setEsp32Status,
-  setConnectedDevice,
-}) {
+export async function connectToESP32({setBluetoothStatus, setEsp32Status, setConnectedDevice}) {
   const hasPermission = await requestBluetoothPermissions();
 
   if (!hasPermission) {
@@ -171,15 +172,42 @@ export async function connectToESP32({
             normalizeUUID(OLED_TEXT_CHAR_UUID)
         );
 
-        if (!hasOledTextCharacteristic) {
-          setBluetoothStatus('Service found, OLED characteristic missing');
-          setEsp32Status('OLED characteristic not found');
+        const hasTemperatureCharacteristic = characteristics.some(
+          (characteristic) =>
+            normalizeUUID(characteristic.uuid) ===
+            normalizeUUID(TEMPERATURE_CHAR_UUID)
+        );
 
-          Alert.alert(
-            'Characteristic not found',
-            'Smart Cup service was found, but the OLED text characteristic was not found.'
-          );
+        const hasCapacityCharacteristic = characteristics.some(
+          (characteristic) =>
+            normalizeUUID(characteristic.uuid) ===
+            normalizeUUID(CAPACITY_CHAR_UUID)
+        );
 
+        if (!hasOledTextCharacteristic || !hasTemperatureCharacteristic || !hasCapacityCharacteristic) {
+          const missingCharacteristics = [];
+
+          if (!hasOledTextCharacteristic) {
+            missingCharacteristics.push('OLED text');
+          }
+
+          if (!hasTemperatureCharacteristic) {
+            missingCharacteristics.push('temperature');
+          }
+
+          if (!hasCapacityCharacteristic) {
+            missingCharacteristics.push('capacity');
+          }
+
+          const missingText = missingCharacteristics.join(' and ');
+
+          setBluetoothStatus(`Service found, ${missingText} characteristic missing`);
+
+          setEsp32Status(`${missingText} characteristic not found`);
+
+          Alert.alert('Characteristic not found', `The Smart Cup service was found, but the ${missingText} characteristic was not found.`);
+
+          await discoveredDevice.cancelConnection();
           return;
         }
 
@@ -250,6 +278,253 @@ export async function sendTextToOLED({connectedDevice, text, setBluetoothStatus}
       'Could not send text to the ESP32 OLED characteristic.'
     );
 
+    return false;
+  }
+}
+
+/**
+ * Subscribe to temperature notifications from the ESP32.
+ *
+ * The ESP32 sends a 32-bit float using:
+ *
+ * temperatureCharacteristic->setValue(temperatureF);
+ * temperatureCharacteristic->notify();
+ *
+ * Returns a BLE subscription. Call subscription.remove() when finished.
+ */
+export function monitorTemperature({connectedDevice, setTemperature, setBluetoothStatus}) {
+  if (!connectedDevice) {
+    console.log('Cannot monitor temperature: ESP32 is not connected.');
+    return null;
+  }
+
+  console.log('Starting temperature notification monitor...');
+
+  const subscription =
+    connectedDevice.monitorCharacteristicForService(
+      SMART_CUP_SERVICE_UUID,
+      TEMPERATURE_CHAR_UUID,
+      (error, characteristic) => {
+        if (error) {
+          console.log('Temperature notification error:', error);
+
+          setBluetoothStatus?.(
+            'Failed to receive temperature notification'
+          );
+
+          return;
+        }
+
+        if (!characteristic?.value) {
+          console.log('Temperature notification contained no value.');
+          return;
+        }
+
+        try {
+          /*
+           * react-native-ble-plx provides BLE values as Base64.
+           * ESP32 floats contain four bytes.
+           */
+          const temperatureBuffer = Buffer.from(
+            characteristic.value,
+            'base64'
+          );
+
+          if (temperatureBuffer.length < 4) {
+            console.log(
+              'Invalid temperature packet length:',
+              temperatureBuffer.length
+            );
+            return;
+          }
+
+          /*
+           * ESP32 uses little-endian byte order, so decode the
+           * received four bytes as a little-endian 32-bit float.
+           */
+          const temperatureF = temperatureBuffer.readFloatLE(0);
+
+          console.log('Received temperature Base64:', characteristic.value);
+          console.log('Received temperature bytes:', temperatureBuffer);
+          console.log('Decoded temperature:', temperatureF);
+
+          setTemperature?.(temperatureF);
+
+          setBluetoothStatus?.(`Temperature: ${temperatureF.toFixed(1)} °F`);
+        } catch (decodeError) {
+          console.log('Temperature decoding error:', decodeError);
+
+          setBluetoothStatus?.('Could not decode temperature value');
+        }
+      }
+    );
+
+  return subscription;
+}
+
+/**
+ * Subscribe to capacity notifications from the ESP32.
+ *
+ * The ESP32 sends the raw four bytes of a 32-bit float through:
+ *
+ * capacityCharacteristic->setValue(capacityBytes, 4);
+ * capacityCharacteristic->notify();
+ *
+ * Returns a BLE subscription. Call subscription.remove()
+ * when the component unmounts.
+ */
+export function monitorCapacity({connectedDevice, setCapacity, setBluetoothStatus}) {
+  if (!connectedDevice) {
+    console.log('Cannot monitor capacity: ESP32 is not connected.');
+    return null;
+  }
+
+  console.log('Starting capacity notification monitor...');
+
+  const subscription =
+    connectedDevice.monitorCharacteristicForService(
+      SMART_CUP_SERVICE_UUID,
+      CAPACITY_CHAR_UUID,
+      (error, characteristic) => {
+        if (error) {
+          console.log('Capacity notification error:',error);
+          setBluetoothStatus?.('Failed to receive capacity notification');
+          return;
+        }
+
+        if (!characteristic?.value) {
+          console.log('Capacity notification contained no value.');
+          return;
+        }
+
+        try {
+          /*
+           * BLE characteristic values are supplied as Base64.
+           * Decode the Base64 value into the original four bytes.
+           */
+          const capacityBuffer = Buffer.from(characteristic.value, 'base64');
+
+          if (capacityBuffer.length !== 4) {
+            console.log('Invalid capacity packet length:', capacityBuffer.length);
+            setBluetoothStatus?.('Invalid capacity packet received');
+            return;
+          }
+
+          /*
+           * This assumes the ESP32 created the uint8_t array from
+           * the raw bytes of a float, normally using memcpy().
+           *
+           * ESP32 processors use little-endian byte order.
+           */
+          const capacityValue = capacityBuffer.readFloatLE(0);
+
+          if (!Number.isFinite(capacityValue)) {
+            console.log('Invalid decoded capacity value:', capacityValue);
+            setBluetoothStatus?.('Invalid capacity value received');
+            return;
+          }
+
+          console.log('Received capacity Base64:', characteristic.value);
+
+          console.log('Received capacity bytes:', Array.from(capacityBuffer));
+
+          console.log('Decoded capacity:', capacityValue);
+
+          setCapacity?.(capacityValue);
+
+          setBluetoothStatus?.(`Capacity: ${capacityValue.toFixed(2)}`);
+        } catch (decodeError) {
+          console.log('Capacity decoding error:', decodeError);
+          setBluetoothStatus?.('Could not decode capacity value');
+        }
+      }
+    );
+
+  return subscription;
+}
+
+export async function getTemperature({connectedDevice, setBluetoothStatus}) {
+  if (!connectedDevice) {
+    Alert.alert('Not connected', 'Connect to the ESP32 first.');
+    return false;
+  }
+
+  try {
+    setBluetoothStatus?.('Requesting temperature...');
+
+    // Create a single unsigned 8-bit value containing 5.
+    const controlValue = TEMPERATURE_COMMMAND;
+    const controlMessageBase64 = Buffer.from([controlValue]).toString('base64');
+
+    await connectedDevice.writeCharacteristicWithResponseForService(
+      SMART_CUP_SERVICE_UUID,
+      TEMPERATURE_CHAR_UUID,
+      controlMessageBase64
+    );
+
+    console.log('Sent temperature control message:', controlValue);
+    console.log('Base64 value:', controlMessageBase64);
+
+    setBluetoothStatus?.('Temperature requested');
+
+    return true;
+  } catch (error) {
+    console.log('Temperature request error:', error);
+
+    setBluetoothStatus?.('Temperature request failed');
+
+    Alert.alert(
+      'Request failed',
+      'Could not send the temperature request to the ESP32.'
+    );
+
+    return false;
+  }
+}
+
+export async function getCapacity({
+  connectedDevice,
+  setBluetoothStatus,
+}) {
+  if (!connectedDevice) {
+    Alert.alert(
+      'Not connected',
+      'Connect to the ESP32 first.'
+    );
+
+    return false;
+  }
+
+  try {
+    setBluetoothStatus?.('Requesting capacity...');
+
+    /*
+     * UPDATE 6 to proper name such as CAPACITY_CHECK_COMMAND
+     * no magic numbers!!!!!
+    */
+    const controlValue = CAPACITY_COMMAND;
+
+    const controlMessageBase64 = Buffer.from([
+      controlValue,
+    ]).toString('base64');
+
+    await connectedDevice.writeCharacteristicWithResponseForService(
+      SMART_CUP_SERVICE_UUID,
+      CAPACITY_CHAR_UUID,
+      controlMessageBase64
+    );
+
+    console.log('Sent capacity control message:', controlValue);
+
+    console.log('Capacity command Base64:', controlMessageBase64);
+
+    setBluetoothStatus?.('Capacity requested; waiting for response...');
+
+    return true;
+  } catch (error) {
+    console.log('Capacity request error:', error);
+    setBluetoothStatus?.('Capacity request failed');
+    Alert.alert('Request failed', 'Could not send the capacity request to the ESP32.');
     return false;
   }
 }
