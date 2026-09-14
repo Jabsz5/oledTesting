@@ -1,21 +1,21 @@
-import { useEffect, useRef, useState } from 'react';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Pressable, ScrollView, StyleSheet } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 
 import {
-  turnHeatingPadOn,
   turnHeatingPadOff,
+  turnHeatingPadOn,
 } from '@/scripts/commands';
 
 import {
-  getTemperature,
-  monitorTemperature,
   getCapacity,
+  getTemperature,
   monitorCapacity,
+  monitorTemperature,
 } from '@/scripts/bluetooth';
 
 import { useBluetooth } from '@/BLEcontext/bluetooth-context';
@@ -35,6 +35,12 @@ export default function TabTwoScreen() {
   const sensorErrorHandled = useRef(false);
 
   const {connectedDevice, bluetoothStatus, setBluetoothStatus} = useBluetooth();
+
+   // Scheduled coffee brewing time
+  const [brewHour, setBrewHour] = useState('8');
+  const [brewMinute, setBrewMinute] = useState('00');
+  const [brewPeriod, setBrewPeriod] = useState<'AM' | 'PM'>('AM');
+  
 
   /*
    * Subscribe to both sensor characteristics when the ESP32
@@ -357,6 +363,123 @@ export default function TabTwoScreen() {
         </ThemedText>
       </ThemedView>
 
+      {/* SCHEDULE COFFEE */}
+<ThemedView style={styles.card}>
+  <ThemedText type="subtitle" style={styles.subtitle}>
+    Schedule Coffee
+  </ThemedText>
+
+  <ThemedText style={styles.scheduleDescription}>
+    Select the time you want the coffee machine to begin brewing.
+  </ThemedText>
+
+  <ThemedView style={styles.timePickerContainer}>
+    {/* HOUR */}
+    <TextInput
+      style={styles.timeInput}
+      value={brewHour}
+      onChangeText={(value) => {
+        const numbersOnly = value.replace(/[^0-9]/g, '');
+
+        if (
+          numbersOnly === '' ||
+          (Number(numbersOnly) >= 1 && Number(numbersOnly) <= 12)
+        ) {
+          setBrewHour(numbersOnly);
+        }
+      }}
+      keyboardType="number-pad"
+      maxLength={2}
+      placeholder="8"
+      placeholderTextColor="#9d8070"
+    />
+
+    <ThemedText style={styles.timeColon}>:</ThemedText>
+
+    {/* MINUTE */}
+    <TextInput
+      style={styles.timeInput}
+      value={brewMinute}
+      onChangeText={(value) => {
+        const numbersOnly = value.replace(/[^0-9]/g, '');
+
+        if (
+          numbersOnly === '' ||
+          (Number(numbersOnly) >= 0 && Number(numbersOnly) <= 59)
+        ) {
+          setBrewMinute(numbersOnly);
+        }
+      }}
+      keyboardType="number-pad"
+      maxLength={2}
+      placeholder="00"
+      placeholderTextColor="#9d8070"
+    />
+
+    {/* AM */}
+    <Pressable
+      style={[
+        styles.periodButton,
+        brewPeriod === 'AM' && styles.periodButtonSelected,
+      ]}
+      onPress={() => setBrewPeriod('AM')}
+    >
+      <ThemedText
+        style={[
+          styles.periodButtonText,
+          brewPeriod === 'AM' && styles.periodButtonTextSelected,
+        ]}
+      >
+        AM
+      </ThemedText>
+    </Pressable>
+
+    {/* PM */}
+    <Pressable
+      style={[
+        styles.periodButton,
+        brewPeriod === 'PM' && styles.periodButtonSelected,
+      ]}
+      onPress={() => setBrewPeriod('PM')}
+    >
+      <ThemedText
+        style={[
+          styles.periodButtonText,
+          brewPeriod === 'PM' && styles.periodButtonTextSelected,
+        ]}
+      >
+        PM
+      </ThemedText>
+    </Pressable>
+  </ThemedView>
+
+    <ThemedView style={styles.selectedTimeContainer}>
+      <ThemedText style={styles.selectedTimeLabel}>
+        Scheduled Brew Time
+      </ThemedText>
+
+      <ThemedText style={styles.selectedTime}>
+        {brewHour || '--'}:
+        {brewMinute.length === 1 ? `0${brewMinute}` : brewMinute || '--'}{' '}
+        {brewPeriod}
+      </ThemedText>
+    </ThemedView>
+
+    <Pressable
+      style={({ pressed }) => [
+        styles.button,
+        pressed && styles.buttonPressed,
+      ]}
+      onPress={() => {
+        // The selected brew time will be sent to the ESP32 later.
+      }}
+    >
+      <ThemedText style={styles.buttonText}>
+        Set Brew Time
+      </ThemedText>
+    </Pressable>
+  </ThemedView>
+
       <ThemedView style={styles.statusBox}>
         <ThemedText type="subtitle" style={styles.subtitle}>
           Bluetooth Status
@@ -545,4 +668,82 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
+
+  scheduleDescription: {
+  fontSize: 14,
+  lineHeight: 20,
+  color: '#8b5e3c',
+},
+
+timePickerContainer: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 8,
+  backgroundColor: 'transparent',
+},
+
+timeInput: {
+  width: 60,
+  height: 55,
+  borderWidth: 1,
+  borderColor: 'rgba(111, 78, 55, 0.45)',
+  borderRadius: 10,
+  textAlign: 'center',
+  fontSize: 20,
+  fontWeight: '600',
+  color: '#4b2e1e',
+  backgroundColor: 'rgba(255, 255, 255, 0.35)',
+},
+
+timeColon: {
+  fontSize: 26,
+  fontWeight: 'bold',
+  color: '#6f4e37',
+},
+
+periodButton: {
+  height: 55,
+  paddingHorizontal: 14,
+  borderRadius: 10,
+  alignItems: 'center',
+  justifyContent: 'center',
+  borderWidth: 1,
+  borderColor: 'rgba(111, 78, 55, 0.45)',
+  backgroundColor: 'rgba(255, 255, 255, 0.35)',
+},
+
+periodButtonSelected: {
+  backgroundColor: '#a76a50',
+  borderColor: '#a76a50',
+},
+
+periodButtonText: {
+  fontSize: 16,
+  fontWeight: 'bold',
+  color: '#6f4e37',
+},
+
+periodButtonTextSelected: {
+  color: '#ffffff',
+},
+
+selectedTimeContainer: {
+  alignItems: 'center',
+  paddingVertical: 14,
+  borderRadius: 10,
+  gap: 4,
+  backgroundColor: 'rgba(255, 255, 255, 0.20)',
+},
+
+selectedTimeLabel: {
+  fontSize: 14,
+  color: '#8b5e3c',
+},
+
+selectedTime: {
+  fontSize: 26,
+  fontWeight: 'bold',
+  color: '#6f4e37',
+},
 });

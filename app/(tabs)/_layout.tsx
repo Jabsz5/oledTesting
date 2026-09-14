@@ -1,16 +1,16 @@
+import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Tabs } from 'expo-router';
 import React from 'react';
 
 import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
 
   return (
-      <Tabs
+    <Tabs
       screenOptions={{
         tabBarActiveTintColor: '#ffffff',
         tabBarInactiveTintColor: '#e8d8d0',
@@ -22,11 +22,15 @@ export default function TabLayout() {
       }}
     >
       <Tabs.Screen
-        name="Home"
+        name="index"
         options={{
           title: 'Connect',
           tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="house.fill" color={color} />
+            <IconSymbol
+              size={28}
+              name="house.fill"
+              color={color}
+            />
           ),
         }}
       />
@@ -36,10 +40,28 @@ export default function TabLayout() {
         options={{
           title: 'User Controls',
           tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="paperplane.fill" color={color} />
+            <FontAwesome
+              name="gear"
+              size={24}
+              color={color}
+            />
           ),
         }}
       />
-  </Tabs>
+
+      <Tabs.Screen
+        name="drawing"
+        options={{
+          title: 'Draw!',
+          tabBarIcon: ({ color }) => (
+            <FontAwesome
+              name="paint-brush"
+              size={24}
+              color={color}
+            />
+          ),
+        }}
+      />
+    </Tabs>
   );
 }
