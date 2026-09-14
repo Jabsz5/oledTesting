@@ -28,42 +28,31 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 
 export default function HomeScreen() {
-  const {
-    esp32Status,
-    setEsp32Status,
-    bluetoothStatus,
-    setBluetoothStatus,
-    connectedDevice,
-    setConnectedDevice,
-  } = useBluetooth();
+  // useBluetooth() returns an object containing these variables and functions
+  // It is sort of like a class and its respective variables and functions.
+  // In react though, its called a hook/function returning an object, not a class
+  const {esp32Status, setEsp32Status, bluetoothStatus, setBluetoothStatus, connectedDevice, setConnectedDevice,} = useBluetooth();
 
+  // useState creates a state variable and gives a function to modify it
+  // We set the var to '' in the beginning
   const [oledText, setOledText] = useState('');
 
-  // Stores the local URI of the photo selected from the gallery.
-  // Later this can be used when sending the image to the OLED.
+  // Typescript feature. Tells us value is allowed to either be string or null
+  // We also default to null as default value
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
+  // When component goes away, make sure Bluetooth scan stops.
   useEffect(() => {
     return () => {
       stopBluetoothScan();
     };
   }, []);
 
-  const ConnectToBluetooth = () => {
-    connectToESP32({
-      setBluetoothStatus,
-      setEsp32Status,
-      setConnectedDevice,
-    });
-  };
-
-  const SendTextToOLED = () => {
-    sendTextToOLED({
-      connectedDevice,
-      text: oledText,
-      setBluetoothStatus,
-    });
-  };
+  // Create a function. This function runs connectToESP32. Give it 3 state-setting functions in order to update bluetooth connection information
+  const ConnectToBluetooth = () => {connectToESP32({setBluetoothStatus, setEsp32Status, setConnectedDevice,});};
+  const SendTextToOLED = () => {sendTextToOLED({connectedDevice, text: oledText, setBluetoothStatus,});};
+  // TO-DO:
+  // Send Photo to OLED
 
   // Opens the user's photo gallery and lets them select an image.
   const PickImage = async () => {

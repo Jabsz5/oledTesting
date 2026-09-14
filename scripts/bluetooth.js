@@ -1,8 +1,8 @@
 // scripts/bluetooth.js
 
+import { Buffer } from 'buffer';
 import { Alert, PermissionsAndroid, Platform } from 'react-native';
 import { BleManager } from 'react-native-ble-plx';
-import { Buffer } from 'buffer';
 
 // This object controls Bluetooth scanning/connecting
 const bleManager = new BleManager();
@@ -77,16 +77,8 @@ export async function connectToESP32({setBluetoothStatus, setEsp32Status, setCon
 
   let deviceFound = false;
 
-  /*
-    This scans specifically for devices advertising your custom service UUID.
 
-    This only works if the ESP32 code has:
-    advertising->addServiceUUID(SERVICE_UUID);
-  */
-  bleManager.startDeviceScan(
-    [SMART_CUP_SERVICE_UUID],
-    null,
-    async (error, device) => {
+  const handleDeviceScan = async (error, device) => {
       if (error) {
         console.log('Scan error:', error);
         setBluetoothStatus('Scan error');
@@ -120,17 +112,13 @@ export async function connectToESP32({setBluetoothStatus, setEsp32Status, setCon
       try {
         const connectedDevice = await device.connect();
 
-        const discoveredDevice =
-          await connectedDevice.discoverAllServicesAndCharacteristics();
+        const discoveredDevice = await connectedDevice.discoverAllServicesAndCharacteristics();
 
         console.log('Connected and discovered services.');
 
         const services = await discoveredDevice.services();
 
-        console.log(
-          'Discovered services:',
-          services.map((service) => service.uuid)
-        );
+        console.log('Discovered services:', services.map((service) => service.uuid));
 
         const hasSmartCupService = services.some(
           (service) =>
@@ -142,18 +130,11 @@ export async function connectToESP32({setBluetoothStatus, setEsp32Status, setCon
           setBluetoothStatus('Connected, but service not found');
           setEsp32Status('Smart Cup service missing');
 
-          Alert.alert(
-            'Service not found',
-            'Connected to ESP32, but the Smart Cup service was not found.'
-          );
-
+          Alert.alert('Service not found', 'Connected to ESP32, but the Smart Cup service was not found.');
           return;
         }
 
-        const characteristics =
-          await discoveredDevice.characteristicsForService(
-            SMART_CUP_SERVICE_UUID
-          );
+        const characteristics = await discoveredDevice.characteristicsForService(SMART_CUP_SERVICE_UUID);
 
         console.log(
           'Smart Cup characteristics:',
@@ -216,10 +197,7 @@ export async function connectToESP32({setBluetoothStatus, setEsp32Status, setCon
         setBluetoothStatus('Connected. Service found.');
         setEsp32Status(`Connected to ${deviceName}`);
 
-        Alert.alert(
-          'Connected',
-          `Connected to ${deviceName} and found the OLED text characteristic.`
-        );
+        Alert.alert('Connected', `Connected to ${deviceName} and found the OLED text characteristic.`);
       } catch (connectError) {
         console.log('Connection error:', connectError);
 
@@ -229,14 +207,20 @@ export async function connectToESP32({setBluetoothStatus, setEsp32Status, setCon
         Alert.alert('Connection failed', 'Could not connect to the ESP32.');
       }
     }
-  );
+  /*
+    This scans specifically for devices advertising your custom service UUID.
+
+    This only works if the ESP32 code has:
+    advertising->addServiceUUID(SERVICE_UUID);
+  */
+  bleManager.startDeviceScan([SMART_CUP_SERVICE_UUID], null, handleDeviceScan);
 
   // Stop scanning after 10 seconds if no matching service is found
   setTimeout(() => {
     if (!deviceFound) {
       bleManager.stopDeviceScan();
       setBluetoothStatus('Scan stopped');
-      setEsp32Status('Smart Cup service not found');
+      setEsp32Status('Smart Cup service not found after 10 seconds');
     }
   }, 10000);
 }
@@ -265,23 +249,18 @@ export async function sendTextToOLED({connectedDevice, text, setBluetoothStatus}
     );
 
     console.log('Sent text to OLED:', text);
-
     setBluetoothStatus?.('Text sent to OLED');
 
     return true;
   } catch (error) {
     console.log('OLED write error:', error);
-
     setBluetoothStatus?.('OLED write failed');
-
-    Alert.alert(
-      'Write failed',
-      'Could not send text to the ESP32 OLED characteristic.'
-    );
+    Alert.alert('Write failed', 'Could not send text to the ESP32 OLED characteristic.');
 
     return false;
   }
 }
+
 
 /**
  * Subscribe to temperature notifications from the ESP32.
@@ -293,11 +272,7 @@ export async function sendTextToOLED({connectedDevice, text, setBluetoothStatus}
  *
  * Returns a BLE subscription. Call subscription.remove() when finished.
  */
-export function monitorTemperature({
-  connectedDevice,
-  setTemperature,
-  setBluetoothStatus,
-}) {
+export function monitorTemperature({connectedDevice, setTemperature, setBluetoothStatus,}) {
   if (!connectedDevice) {
     console.log(
       'Cannot monitor temperature: ESP32 is not connected.'
@@ -309,32 +284,18 @@ export function monitorTemperature({
   console.log('Starting temperature notification monitor...');
 
   // These variables remain alive for the lifetime of this BLE subscription.
-let sensorErrorAlertShown = false;
-let lowTemperatureAlertShown = false;
+  let sensorErrorAlertShown = false;
+  let lowTemperatureAlertShown = false;
 
-const subscription =
-  connectedDevice.monitorCharacteristicForService(
-    SMART_CUP_SERVICE_UUID,
-    TEMPERATURE_CHAR_UUID,
-    (error, characteristic) => {
+  const handleTemperatureNotification = (error, characteristic) => {
       if (error) {
-        console.log(
-          'Temperature notification error:',
-          error
-        );
-
-        setBluetoothStatus?.(
-          'Failed to receive temperature notification'
-        );
-
+        console.log('Temperature notification error:', error);
+        setBluetoothStatus?.('Failed to receive temperature notification');
         return;
       }
 
       if (!characteristic?.value) {
-        console.log(
-          'Temperature notification contained no value.'
-        );
-
+        console.log('Temperature notification contained no value.');
         return;
       }
 
@@ -397,11 +358,7 @@ const subscription =
 
           if (!sensorErrorAlertShown) {
             sensorErrorAlertShown = true;
-
-            Alert.alert(
-              'Temperature Sensor Error',
-              'The temperature sensor is not connected or responding!'
-            );
+            Alert.alert('Temperature Sensor Error','The temperature sensor is not connected or not responding!');
           }
           // Do not execute the low-temperature alert below.
           return;
@@ -452,35 +409,18 @@ const subscription =
         );
       }
     }
-  );
+
+  const subscription = connectedDevice.monitorCharacteristicForService(
+                                    SMART_CUP_SERVICE_UUID,
+                                    TEMPERATURE_CHAR_UUID,
+                                    handleTemperatureNotification
+                                    );
 
   return subscription;
 }
 
-/**
- * Subscribe to capacity notifications from the ESP32.
- *
- * The ESP32 sends the raw four bytes of a 32-bit float through:
- *
- * capacityCharacteristic->setValue(capacityBytes, 4);
- * capacityCharacteristic->notify();
- *
- * Returns a BLE subscription. Call subscription.remove()
- * when the component unmounts.
- */
-export function monitorCapacity({connectedDevice, setCapacity, setBluetoothStatus}) {
-  if (!connectedDevice) {
-    console.log('Cannot monitor capacity: ESP32 is not connected.');
-    return null;
-  }
 
-  console.log('Starting capacity notification monitor...');
-
-  const subscription =
-    connectedDevice.monitorCharacteristicForService(
-      SMART_CUP_SERVICE_UUID,
-      CAPACITY_CHAR_UUID,
-      (error, characteristic) => {
+const handleCapacityNotification = (error, characteristic) => {
         if (error) {
           console.log('Capacity notification error:',error);
           setBluetoothStatus?.('Failed to receive capacity notification');
@@ -533,6 +473,30 @@ export function monitorCapacity({connectedDevice, setCapacity, setBluetoothStatu
           setBluetoothStatus?.('Could not decode capacity value');
         }
       }
+/**
+ * Subscribe to capacity notifications from the ESP32.
+ *
+ * The ESP32 sends the raw four bytes of a 32-bit float through:
+ *
+ * capacityCharacteristic->setValue(capacityBytes, 4);
+ * capacityCharacteristic->notify();
+ *
+ * Returns a BLE subscription. Call subscription.remove()
+ * when the component unmounts.
+ */
+export function monitorCapacity({connectedDevice, setCapacity, setBluetoothStatus}) {
+  if (!connectedDevice) {
+    console.log('Cannot monitor capacity: ESP32 is not connected.');
+    return null;
+  }
+
+  console.log('Starting capacity notification monitor...');
+
+  const subscription =
+    connectedDevice.monitorCharacteristicForService(
+      SMART_CUP_SERVICE_UUID,
+      CAPACITY_CHAR_UUID,
+      handleCapacityNotification
     );
 
   return subscription;
@@ -577,16 +541,9 @@ export async function getTemperature({connectedDevice, setBluetoothStatus}) {
   }
 }
 
-export async function getCapacity({
-  connectedDevice,
-  setBluetoothStatus,
-}) {
+export async function getCapacity({connectedDevice, setBluetoothStatus,}) {
   if (!connectedDevice) {
-    Alert.alert(
-      'Not connected',
-      'Connect to the ESP32 first.'
-    );
-
+    Alert.alert('Not connected', 'Connect to the ESP32 first.');
     return false;
   }
 
@@ -599,9 +556,7 @@ export async function getCapacity({
     */
     const controlValue = CAPACITY_COMMAND;
 
-    const controlMessageBase64 = Buffer.from([
-      controlValue,
-    ]).toString('base64');
+    const controlMessageBase64 = Buffer.from([controlValue,]).toString('base64');
 
     await connectedDevice.writeCharacteristicWithResponseForService(
       SMART_CUP_SERVICE_UUID,
@@ -610,18 +565,16 @@ export async function getCapacity({
     );
 
     console.log('Sent capacity control message:', controlValue);
-
     console.log('Capacity command Base64:', controlMessageBase64);
-
     setBluetoothStatus?.('Capacity requested; waiting for response...');
 
     return true;
-  } catch (error) {
-    console.log('Capacity request error:', error);
-    setBluetoothStatus?.('Capacity request failed');
-    Alert.alert('Request failed', 'Could not send the capacity request to the ESP32.');
-    return false;
-  }
+    } catch (error) {
+        console.log('Capacity request error:', error);
+        setBluetoothStatus?.('Capacity request failed');
+        Alert.alert('Request failed', 'Could not send the capacity request to the ESP32.');
+        return false;
+      }
 }
 
 export function stopBluetoothScan() {
