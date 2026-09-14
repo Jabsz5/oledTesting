@@ -16,6 +16,7 @@ export const CAPACITY_CHAR_UUID = 'abcd1234-5678-90ab-cdef-1234567890ae';
 
 const TEMPERATURE_COMMMAND = 5;
 const CAPACITY_COMMAND = 6;
+const LOW_TEMPERATURE_ALERT_F = 60;
 
 function normalizeUUID(uuid) {
   return uuid?.toLowerCase();
@@ -292,72 +293,166 @@ export async function sendTextToOLED({connectedDevice, text, setBluetoothStatus}
  *
  * Returns a BLE subscription. Call subscription.remove() when finished.
  */
-export function monitorTemperature({connectedDevice, setTemperature, setBluetoothStatus}) {
+export function monitorTemperature({
+  connectedDevice,
+  setTemperature,
+  setBluetoothStatus,
+}) {
   if (!connectedDevice) {
-    console.log('Cannot monitor temperature: ESP32 is not connected.');
+    console.log(
+      'Cannot monitor temperature: ESP32 is not connected.'
+    );
+
     return null;
   }
 
   console.log('Starting temperature notification monitor...');
 
-  const subscription =
-    connectedDevice.monitorCharacteristicForService(
-      SMART_CUP_SERVICE_UUID,
-      TEMPERATURE_CHAR_UUID,
-      (error, characteristic) => {
-        if (error) {
-          console.log('Temperature notification error:', error);
+  // These variables remain alive for the lifetime of this BLE subscription.
+let sensorErrorAlertShown = false;
+let lowTemperatureAlertShown = false;
 
+const subscription =
+  connectedDevice.monitorCharacteristicForService(
+    SMART_CUP_SERVICE_UUID,
+    TEMPERATURE_CHAR_UUID,
+    (error, characteristic) => {
+      if (error) {
+        console.log(
+          'Temperature notification error:',
+          error
+        );
+
+        setBluetoothStatus?.(
+          'Failed to receive temperature notification'
+        );
+
+        return;
+      }
+
+      if (!characteristic?.value) {
+        console.log(
+          'Temperature notification contained no value.'
+        );
+
+        return;
+      }
+
+      try {
+        const temperatureBuffer = Buffer.from(
+          characteristic.value,
+          'base64'
+        );
+
+        if (temperatureBuffer.length !== 4) {
+          console.log(
+            'Invalid temperature packet length:',
+            temperatureBuffer.length
+          );
+
+          return;
+        }
+
+        const temperatureF =
+          temperatureBuffer.readFloatLE(0);
+
+        if (!Number.isFinite(temperatureF)) {
+          console.log(
+            'Invalid decoded temperature:',
+            temperatureF
+          );
+
+          return;
+        }
+
+        console.log(
+          'Received temperature Base64:',
+          characteristic.value
+        );
+
+        console.log(
+          'Received temperature bytes:',
+          Array.from(temperatureBuffer)
+        );
+
+        console.log(
+          'Decoded temperature:',
+          temperatureF
+        );
+
+        // Pass the decoded value to the React component.
+        setTemperature?.(temperatureF);
+
+        const ERROR_VALUE = -100;
+
+        /*
+         * Handle a disconnected or failed sensor first.
+         * This prevents -196.6°F from being treated as an
+         * ordinary temperature below 60°F.
+         */
+        if (temperatureF < ERROR_VALUE) {
           setBluetoothStatus?.(
-            'Failed to receive temperature notification'
+            'Temperature sensor is not connected or responding'
           );
 
-          return;
-        }
+          if (!sensorErrorAlertShown) {
+            sensorErrorAlertShown = true;
 
-        if (!characteristic?.value) {
-          console.log('Temperature notification contained no value.');
-          return;
-        }
-
-        try {
-          /*
-           * react-native-ble-plx provides BLE values as Base64.
-           * ESP32 floats contain four bytes.
-           */
-          const temperatureBuffer = Buffer.from(
-            characteristic.value,
-            'base64'
-          );
-
-          if (temperatureBuffer.length < 4) {
-            console.log(
-              'Invalid temperature packet length:',
-              temperatureBuffer.length
+            Alert.alert(
+              'Temperature Sensor Error',
+              'The temperature sensor is not connected or responding!'
             );
-            return;
+          }
+          // Do not execute the low-temperature alert below.
+          return;
+        }
+
+        /*
+         * A valid reading was received, so a future sensor
+         * disconnection may produce another error alert.
+         */
+        sensorErrorAlertShown = false;
+
+        setBluetoothStatus?.(
+          `Temperature: ${temperatureF.toFixed(1)} °F`
+        );
+
+        if (temperatureF < LOW_TEMPERATURE_ALERT_F) {
+          if (!lowTemperatureAlertShown) {
+            lowTemperatureAlertShown = true;
+
+            console.log(
+              'Low-temperature alert received from ESP32.'
+            );
+
+            Alert.alert(
+              'Temperature Alert',
+              `Alert! Temperature is below ${LOW_TEMPERATURE_ALERT_F} degrees!`
+            );
           }
 
-          /*
-           * ESP32 uses little-endian byte order, so decode the
-           * received four bytes as a little-endian 32-bit float.
-           */
-          const temperatureF = temperatureBuffer.readFloatLE(0);
-
-          console.log('Received temperature Base64:', characteristic.value);
-          console.log('Received temperature bytes:', temperatureBuffer);
-          console.log('Decoded temperature:', temperatureF);
-
-          setTemperature?.(temperatureF);
-
-          setBluetoothStatus?.(`Temperature: ${temperatureF.toFixed(1)} °F`);
-        } catch (decodeError) {
-          console.log('Temperature decoding error:', decodeError);
-
-          setBluetoothStatus?.('Could not decode temperature value');
+          return;
         }
+
+        /*
+         * Re-arm the low-temperature alert after the
+         * temperature returns to a safe value.
+         */
+        if (temperatureF >= 65) {
+          lowTemperatureAlertShown = false;
+        }
+      } catch (decodeError) {
+        console.log(
+          'Temperature decoding error:',
+          decodeError
+        );
+
+        setBluetoothStatus?.(
+          'Could not decode temperature value'
+        );
       }
-    );
+    }
+  );
 
   return subscription;
 }

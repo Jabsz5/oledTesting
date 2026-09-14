@@ -1,11 +1,10 @@
-import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Pressable, ScrollView, StyleSheet } from 'react-native';
 
-import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Fonts } from '@/constants/theme';
 
 import {
   turnHeatingPadOn,
@@ -20,24 +19,22 @@ import {
 } from '@/scripts/bluetooth';
 
 import { useBluetooth } from '@/BLEcontext/bluetooth-context';
+const LOW_TEMPERATURE_ALERT_F = 60;
 
 export default function TabTwoScreen() {
-  const [statusMessage, setStatusMessage] = useState(
-    'Ready to send commands.'
-  );
+  const [statusMessage, setStatusMessage] = useState('Ready to send commands.');
 
   const [isSending, setIsSending] = useState(false);
   const [heaterEnabled, setHeaterEnabled] = useState(false);
 
   // Most recently received sensor values.
   const [temperature, setTemperature] = useState<number | null>(null);
+  const [lowTemperatureDetected, setLowTemperatureDetected] = useState(false);
   const [capacity, setCapacity] = useState<number | null>(null);
+  // Error handling
+  const sensorErrorHandled = useRef(false);
 
-  const {
-    connectedDevice,
-    bluetoothStatus,
-    setBluetoothStatus,
-  } = useBluetooth();
+  const {connectedDevice, bluetoothStatus, setBluetoothStatus} = useBluetooth();
 
   /*
    * Subscribe to both sensor characteristics when the ESP32
@@ -47,6 +44,8 @@ export default function TabTwoScreen() {
     if (!connectedDevice) {
       setTemperature(null);
       setCapacity(null);
+      setLowTemperatureDetected(false);
+
       return;
     }
 
@@ -54,13 +53,37 @@ export default function TabTwoScreen() {
       connectedDevice,
 
       setTemperature: (receivedTemperature: number) => {
+        const ERROR_VALUE = -100;
+        const sensorError = receivedTemperature < ERROR_VALUE;
+
+        if (sensorError) {
+            // Ignore repeated disconnected-sensor notifications
+            if (sensorErrorHandled.current) {
+                return;
+            }
+            sensorErrorHandled.current = true;
+
+            setTemperature(receivedTemperature);
+            setLowTemperatureDetected(false);
+            setStatusMessage("Alert! Temperature sensor is not connected or not responding!");
+            return;
+        }
+        // A valid temperature was received, so allow a future
+        // disconnected-sensor error to be handled again.
+        sensorErrorHandled.current = false;
+
         setTemperature(receivedTemperature);
 
-        setStatusMessage(
-          `Temperature received: ${receivedTemperature.toFixed(1)} °F`
-        );
-      },
+        const isLowTemperature = receivedTemperature < LOW_TEMPERATURE_ALERT_F;
 
+        setLowTemperatureDetected(isLowTemperature);
+
+        if (isLowTemperature) {
+            setStatusMessage(`Alert! Temperature is below ${LOW_TEMPERATURE_ALERT_F} °F!`);
+        } else {
+            setStatusMessage(`Temperature received: ${receivedTemperature.toFixed(1)} °F`);
+        }
+    },
       setBluetoothStatus,
     });
 
@@ -201,25 +224,24 @@ export default function TabTwoScreen() {
   }
 
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{
-        light: '#D0D0D0',
-        dark: '#353636',
-      }}
-      headerImage={
-        <IconSymbol
-          size={310}
-          color="#808080"
-          name="cup.and.saucer.fill"
-          style={styles.headerImage}
+    <LinearGradient
+      colors={['#fff8f0', '#f1e0d6']}
+      locations={[0, 1]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 0, y: 1 }}
+      style={styles.gradient}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={true}>
+        <Image
+          source={require('@/assets/images/coffee_pot.png')}
+          style={styles.SmartCoffeeCupLogo}
+          contentFit="contain"
         />
-      }>
+
       <ThemedView style={styles.titleContainer}>
-        <ThemedText
-          type="title"
-          style={{
-            fontFamily: Fonts.rounded,
-          }}>
+        <ThemedText type="title" style={styles.title}>
           Smart Cup Controls
         </ThemedText>
       </ThemedView>
@@ -230,25 +252,35 @@ export default function TabTwoScreen() {
       </ThemedText>
 
       <ThemedView style={styles.card}>
-        <ThemedText type="subtitle" style={styles.cardTitle}>
+        <ThemedText type="subtitle" style={styles.subtitle}>
           Coffee Sensors
         </ThemedText>
 
+        
+
         <ThemedView style={styles.sensorRow}>
-          {/* Temperature value received through BLE notify(). */}
-          <ThemedView style={styles.sensorDisplay}>
+          <ThemedView
+            style={[
+              styles.sensorDisplay,
+              lowTemperatureDetected &&
+                styles.lowTemperatureSensorDisplay,
+            ]}>
             <ThemedText style={styles.sensorLabel}>
               Temperature
             </ThemedText>
 
-            <ThemedText style={styles.sensorValue}>
+            <ThemedText
+              style={[
+                styles.sensorValue,
+                lowTemperatureDetected &&
+                  styles.lowTemperatureSensorValue,
+              ]}>
               {temperature === null
                 ? '--.- °F'
                 : `${temperature.toFixed(1)} °F`}
             </ThemedText>
           </ThemedView>
 
-          {/* Capacity value received through BLE notify(). */}
           <ThemedView style={styles.sensorDisplay}>
             <ThemedText style={styles.sensorLabel}>
               Capacity
@@ -261,6 +293,14 @@ export default function TabTwoScreen() {
             </ThemedText>
           </ThemedView>
         </ThemedView>
+
+        {lowTemperatureDetected && (
+          <ThemedView style={styles.temperatureAlert}>
+            <ThemedText style={styles.temperatureAlertText}>
+              Alert! Temperature is below 60 degrees!
+            </ThemedText>
+          </ThemedView>
+        )}
 
         <Pressable
           style={({ pressed }) => [
@@ -290,7 +330,7 @@ export default function TabTwoScreen() {
       </ThemedView>
 
       <ThemedView style={styles.card}>
-        <ThemedText type="subtitle" style={styles.cardTitle}>
+        <ThemedText type="subtitle" style={styles.subtitle}>
           Heating Pad
         </ThemedText>
 
@@ -318,55 +358,81 @@ export default function TabTwoScreen() {
       </ThemedView>
 
       <ThemedView style={styles.statusBox}>
-        <ThemedText type="defaultSemiBold">
+        <ThemedText type="subtitle" style={styles.subtitle}>
           Bluetooth Status
         </ThemedText>
 
-        <ThemedText>
+        <ThemedText style={styles.statusText}>
           {bluetoothStatus || 'No Bluetooth status available.'}
         </ThemedText>
 
         <ThemedText
-          type="defaultSemiBold"
-          style={styles.commandStatusTitle}>
+          type="subtitle"
+          style={[styles.subtitle, styles.commandStatusTitle]}>
           Command Status
         </ThemedText>
 
-        <ThemedText>{statusMessage}</ThemedText>
+        <ThemedText style={styles.statusText}>{statusMessage}</ThemedText>
       </ThemedView>
-    </ParallaxScrollView>
+      </ScrollView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  headerImage: {
-    color: '#808080',
-    bottom: -90,
-    left: -35,
-    position: 'absolute',
+  gradient: {
+    flex: 1,
+  },
+
+  scrollView: {
+    flex: 1,
+    backgroundColor: '#cfa68a',
+  },
+
+  scrollContent: {
+    flexGrow: 1,
+    gap: 20,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 60,
   },
 
   titleContainer: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
+    backgroundColor: 'transparent',
+  },
+
+  title: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#6f4e37',
+    textAlign: 'center',
+  },
+
+  subtitle: {
+    color: '#6f4e37',
   },
 
   description: {
-    marginTop: 8,
-    marginBottom: 16,
     lineHeight: 22,
+    color: '#4b2e1e',
+  },
+
+  statusText: {
+    fontSize: 16,
+    color: '#8b5e3c',
   },
 
   card: {
     padding: 18,
-    borderRadius: 16,
-    marginBottom: 18,
+    borderRadius: 12,
     gap: 12,
-    backgroundColor: 'rgba(128, 128, 128, 0.12)',
-  },
-
-  cardTitle: {
-    marginBottom: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.30)',
+    borderWidth: 1,
+    borderColor: 'rgba(111, 78, 55, 0.15)',
   },
 
   sensorRow: {
@@ -382,33 +448,37 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(128, 128, 128, 0.12)',
+    backgroundColor: 'rgba(255, 255, 255, 0.35)',
+    borderWidth: 1,
+    borderColor: 'rgba(111, 78, 55, 0.15)',
   },
 
   sensorLabel: {
     fontSize: 14,
     opacity: 0.75,
+    color: '#4b2e1e',
   },
 
   sensorValue: {
     fontSize: 24,
     fontWeight: '700',
+    color: '#8b5e3c',
   },
 
   button: {
-    paddingVertical: 16,
-    paddingHorizontal: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
     borderRadius: 12,
     alignItems: 'center',
-    backgroundColor: '#2563eb',
+    backgroundColor: '#a76a50',
   },
 
   heaterOnButton: {
-    backgroundColor: '#dc2626',
+    backgroundColor: '#8b5e3c',
   },
 
   heaterOffButton: {
-    backgroundColor: '#16a34a',
+    backgroundColor: '#a76a50',
   },
 
   buttonPressed: {
@@ -423,23 +493,56 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#ffffff',
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: 'bold',
   },
 
   heaterStatus: {
     textAlign: 'center',
     marginTop: 4,
+    color: '#4b2e1e',
   },
 
   statusBox: {
     padding: 16,
     borderRadius: 12,
     gap: 6,
-    backgroundColor: 'rgba(128, 128, 128, 0.12)',
-    marginBottom: 30,
+    backgroundColor: 'rgba(255, 255, 255, 0.30)',
+    borderWidth: 1,
+    borderColor: 'rgba(111, 78, 55, 0.15)',
   },
 
   commandStatusTitle: {
     marginTop: 8,
+  },
+
+  SmartCoffeeCupLogo: {
+    width: 200,
+    height: 178,
+    alignSelf: 'center',
+  },
+
+  lowTemperatureSensorDisplay: {
+    borderWidth: 2,
+    borderColor: '#dc2626',
+    backgroundColor: 'rgba(220, 38, 38, 0.12)',
+  },
+
+  lowTemperatureSensorValue: {
+    color: '#dc2626',
+  },
+
+  temperatureAlert: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: '#dc2626',
+  },
+
+  temperatureAlertText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '700',
+    textAlign: 'center',
   },
 });
