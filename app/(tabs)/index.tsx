@@ -22,8 +22,10 @@ import {
   stopBluetoothScan,
 } from '@/scripts/bluetooth';
 
+
 import { useBluetooth } from '@/BLEcontext/bluetooth-context';
 
+import { sendPhotoToOLED } from '@/scripts/photo';
 import { LinearGradient } from 'expo-linear-gradient';
 
 
@@ -53,6 +55,14 @@ export default function HomeScreen() {
   const SendTextToOLED = () => {sendTextToOLED({connectedDevice, text: oledText, setBluetoothStatus,});};
   // TO-DO:
   // Send Photo to OLED
+  const SendPhotoToOLED = async () => {
+  if (!selectedImage) {
+    console.log('No photo selected');
+    return;
+  }
+
+  sendPhotoToOLED({selectedImage,});
+};
 
   // Opens the user's photo gallery and lets them select an image.
   const PickImage = async () => {
@@ -200,9 +210,7 @@ export default function HomeScreen() {
               styles.sendPhotoButton,
               pressed && styles.buttonPressed,
             ]}
-            onPress={() => {
-              // Image-to-OLED functionality will be added later.
-            }}
+            onPress={SendPhotoToOLED}
           >
             <ThemedText style={styles.buttonText}>
               Send Photo to OLED

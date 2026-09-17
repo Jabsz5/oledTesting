@@ -13,6 +13,7 @@ export const SMART_CUP_SERVICE_UUID = '12345678-1234-1234-1234-1234567890ab';
 export const OLED_TEXT_CHAR_UUID = 'abcd1234-5678-90ab-cdef-1234567890ab';
 export const TEMPERATURE_CHAR_UUID = 'abcd1234-5678-90ab-cdef-1234567890ad';
 export const CAPACITY_CHAR_UUID = 'abcd1234-5678-90ab-cdef-1234567890ae';
+export const PHOTO_CHAR_UUID = "abcd1234-5678-90ab-cdef-1234567890af";
 
 const TEMPERATURE_COMMMAND = 5;
 const CAPACITY_COMMAND = 6;
@@ -103,28 +104,18 @@ export async function connectToESP32({setBluetoothStatus, setEsp32Status, setCon
       }
 
       deviceFound = true;
-
       setBluetoothStatus('Smart Cup service found. Connecting...');
       setEsp32Status(`Found: ${deviceName}`);
-
       bleManager.stopDeviceScan();
 
       try {
         const connectedDevice = await device.connect();
-
         const discoveredDevice = await connectedDevice.discoverAllServicesAndCharacteristics();
-
         console.log('Connected and discovered services.');
-
         const services = await discoveredDevice.services();
-
         console.log('Discovered services:', services.map((service) => service.uuid));
 
-        const hasSmartCupService = services.some(
-          (service) =>
-            normalizeUUID(service.uuid) ===
-            normalizeUUID(SMART_CUP_SERVICE_UUID)
-        );
+        const hasSmartCupService = services.some((service) => normalizeUUID(service.uuid) === normalizeUUID(SMART_CUP_SERVICE_UUID));
 
         if (!hasSmartCupService) {
           setBluetoothStatus('Connected, but service not found');
@@ -148,25 +139,12 @@ export async function connectToESP32({setBluetoothStatus, setEsp32Status, setCon
           }))
         );
 
-        const hasOledTextCharacteristic = characteristics.some(
-          (characteristic) =>
-            normalizeUUID(characteristic.uuid) ===
-            normalizeUUID(OLED_TEXT_CHAR_UUID)
-        );
+        const hasOledTextCharacteristic = characteristics.some((characteristic) => normalizeUUID(characteristic.uuid) === normalizeUUID(OLED_TEXT_CHAR_UUID));
+        const hasTemperatureCharacteristic = characteristics.some((characteristic) => normalizeUUID(characteristic.uuid) === normalizeUUID(TEMPERATURE_CHAR_UUID));
+        const hasCapacityCharacteristic = characteristics.some((characteristic) => normalizeUUID(characteristic.uuid) === normalizeUUID(CAPACITY_CHAR_UUID));
+        const hasPhotoCharacteristic = characteristics.some((characteristic) => normalizeUUID(characteristic.uuid) === normalizeUUID(PHOTO_CHAR_UUID));
 
-        const hasTemperatureCharacteristic = characteristics.some(
-          (characteristic) =>
-            normalizeUUID(characteristic.uuid) ===
-            normalizeUUID(TEMPERATURE_CHAR_UUID)
-        );
-
-        const hasCapacityCharacteristic = characteristics.some(
-          (characteristic) =>
-            normalizeUUID(characteristic.uuid) ===
-            normalizeUUID(CAPACITY_CHAR_UUID)
-        );
-
-        if (!hasOledTextCharacteristic || !hasTemperatureCharacteristic || !hasCapacityCharacteristic) {
+        if (!hasOledTextCharacteristic || !hasTemperatureCharacteristic || !hasCapacityCharacteristic || !hasPhotoCharacteristic) {
           const missingCharacteristics = [];
 
           if (!hasOledTextCharacteristic) {
@@ -181,14 +159,14 @@ export async function connectToESP32({setBluetoothStatus, setEsp32Status, setCon
             missingCharacteristics.push('capacity');
           }
 
+          if (!hasPhotoCharacteristic) {
+            missingCharacteristics.push('photo');
+          }
+
           const missingText = missingCharacteristics.join(' and ');
-
           setBluetoothStatus(`Service found, ${missingText} characteristic missing`);
-
           setEsp32Status(`${missingText} characteristic not found`);
-
           Alert.alert('Characteristic not found', `The Smart Cup service was found, but the ${missingText} characteristic was not found.`);
-
           await discoveredDevice.cancelConnection();
           return;
         }
@@ -197,7 +175,7 @@ export async function connectToESP32({setBluetoothStatus, setEsp32Status, setCon
         setBluetoothStatus('Connected. Service found.');
         setEsp32Status(`Connected to ${deviceName}`);
 
-        Alert.alert('Connected', `Connected to ${deviceName} and found the OLED text characteristic.`);
+        Alert.alert('Connected', `Connected to ${deviceName} and found all characteristic.`);
       } catch (connectError) {
         console.log('Connection error:', connectError);
 
@@ -207,12 +185,7 @@ export async function connectToESP32({setBluetoothStatus, setEsp32Status, setCon
         Alert.alert('Connection failed', 'Could not connect to the ESP32.');
       }
     }
-  /*
-    This scans specifically for devices advertising your custom service UUID.
 
-    This only works if the ESP32 code has:
-    advertising->addServiceUUID(SERVICE_UUID);
-  */
   bleManager.startDeviceScan([SMART_CUP_SERVICE_UUID], null, handleDeviceScan);
 
   // Stop scanning after 10 seconds if no matching service is found
