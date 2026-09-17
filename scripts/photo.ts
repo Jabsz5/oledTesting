@@ -162,6 +162,9 @@ export const sendPhotoToOLED = async ({selectedImage,}: SendPhotoToOLEDParams) =
         ((g & 0xFC) << 3) |
         (b >> 3);
 
+      // store most significant byte first. Will be using big endian
+      // Store most significant byte at start of memory space.
+      // The proceeding byte gets stored up the memory space.
       rgb565[outputIndex] = (rgb565Pixel >> 8) & 0xFF;
       rgb565[outputIndex + 1] = rgb565Pixel & 0xFF;
 
