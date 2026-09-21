@@ -112,6 +112,11 @@ export async function connectToESP32({setBluetoothStatus, setEsp32Status, setCon
         const connectedDevice = await device.connect();
         const discoveredDevice = await connectedDevice.discoverAllServicesAndCharacteristics();
         console.log('Connected and discovered services.');
+
+        // Check MTU for protocol transmission
+        console.log('Current BLE MTU:', connectedDevice.mtu);
+        console.log('Maximum characteristic value:', connectedDevice.mtu - 3, 'bytes');
+        // End
         const services = await discoveredDevice.services();
         console.log('Discovered services:', services.map((service) => service.uuid));
 

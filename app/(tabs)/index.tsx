@@ -61,7 +61,17 @@ export default function HomeScreen() {
     return;
   }
 
-  sendPhotoToOLED({selectedImage,});
+  if (!connectedDevice) {
+    setBluetoothStatus('No ESP32 connected');
+    return;
+  }
+
+  try {
+    await sendPhotoToOLED({selectedImage, connectedDevice, setBluetoothStatus,});
+  } catch (error) {
+    console.error('Photo transfer error:', error);
+    setBluetoothStatus('Failed to process photo');
+  }
 };
 
   // Opens the user's photo gallery and lets them select an image.
