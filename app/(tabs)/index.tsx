@@ -19,7 +19,9 @@ import { ThemedView } from '@/components/themed-view';
 import {
   connectToESP32,
   sendTextToOLED,
+  startPhotoUpload,
   stopBluetoothScan,
+  waitForPhotoReady,
 } from '@/scripts/bluetooth';
 
 
@@ -53,24 +55,52 @@ export default function HomeScreen() {
   // Create a function. This function runs connectToESP32. Give it 3 state-setting functions in order to update bluetooth connection information
   const ConnectToBluetooth = () => {connectToESP32({setBluetoothStatus, setEsp32Status, setConnectedDevice,});};
   const SendTextToOLED = () => {sendTextToOLED({connectedDevice, text: oledText, setBluetoothStatus,});};
-  // TO-DO:
-  // Send Photo to OLED
   const SendPhotoToOLED = async () => {
+
   if (!selectedImage) {
     console.log('No photo selected');
     return;
   }
 
   if (!connectedDevice) {
-    setBluetoothStatus('No ESP32 connected');
+    setBluetoothStatus(
+      'No ESP32 connected'
+    );
+
     return;
   }
 
   try {
-    await sendPhotoToOLED({selectedImage, connectedDevice, setBluetoothStatus,});
+
+    const readyPromise =
+      waitForPhotoReady({
+        connectedDevice,
+        setBluetoothStatus,
+      });
+
+    await startPhotoUpload({
+      connectedDevice,
+      setBluetoothStatus,
+    });
+
+    await readyPromise;
+
+    await sendPhotoToOLED({
+      selectedImage,
+      connectedDevice,
+      setBluetoothStatus,
+    });
+
   } catch (error) {
-    console.error('Photo transfer error:', error);
-    setBluetoothStatus('Failed to process photo');
+
+    console.error(
+      'Photo transfer error:',
+      error
+    );
+
+    setBluetoothStatus(
+      'Photo transfer failed'
+    );
   }
 };
 

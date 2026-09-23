@@ -17,6 +17,8 @@ export const PHOTO_CHAR_UUID = "abcd1234-5678-90ab-cdef-1234567890af";
 
 const TEMPERATURE_COMMMAND = 5;
 const CAPACITY_COMMAND = 6;
+const UPLOAD_PHOTO_COMMAND = 21;
+const READY_FOR_PHOTO_ACK = 22;
 const LOW_TEMPERATURE_ALERT_F = 60;
 
 function normalizeUUID(uuid) {
@@ -480,6 +482,57 @@ export function monitorCapacity({connectedDevice, setCapacity, setBluetoothStatu
   return subscription;
 }
 
+export function waitForPhotoReady({
+  connectedDevice,
+  setBluetoothStatus,
+}) {
+  return new Promise((resolve, reject) => {
+
+    const subscription =
+      connectedDevice.monitorCharacteristicForService(
+        SMART_CUP_SERVICE_UUID,
+        PHOTO_CHAR_UUID,
+        (error, characteristic) => {
+
+          if (error) {
+            subscription.remove();
+            reject(error);
+            return;
+          }
+
+          if (!characteristic?.value) {
+            return;
+          }
+
+          const buffer =
+            Buffer.from(
+              characteristic.value,
+              'base64'
+            );
+
+          if (buffer.length !== 1) {
+            return;
+          }
+
+          const response =
+            buffer[0];
+
+          console.log(
+            'Photo response received:',
+            response
+          );
+
+          if (response === READY_FOR_PHOTO_ACK) {
+            setBluetoothStatus?.('ESP32 ready for photo upload');
+            subscription.remove();
+            resolve(true);
+          }
+        }
+      );
+  });
+}
+
+
 export async function getTemperature({connectedDevice, setBluetoothStatus}) {
   if (!connectedDevice) {
     Alert.alert('Not connected', 'Connect to the ESP32 first.');
@@ -553,6 +606,36 @@ export async function getCapacity({connectedDevice, setBluetoothStatus,}) {
         Alert.alert('Request failed', 'Could not send the capacity request to the ESP32.');
         return false;
       }
+}
+
+export async function startPhotoUpload({connectedDevice, setBluetoothStatus,}) {
+  if (!connectedDevice) {
+    Alert.alert('Not connected', 'Connect to the ESP32 first.');
+    return false;
+  }
+
+  try {
+    setBluetoothStatus?.('Starting photo upload...');
+
+    const controlValue = UPLOAD_PHOTO_COMMAND;
+
+    const controlMessageBase64 = Buffer.from([controlValue]).toString('base64');
+
+    await connectedDevice.writeCharacteristicWithResponseForService(SMART_CUP_SERVICE_UUID, PHOTO_CHAR_UUID, controlMessageBase64);
+
+    console.log('Sent photo upload command:', controlValue);
+
+    console.log('Photo command Base64:', controlMessageBase64);
+
+    return true;
+
+  } catch (error) {
+    console.log('Photo command error:', error);
+
+    setBluetoothStatus?.('Failed to start photo upload');
+
+    return false;
+  }
 }
 
 export function stopBluetoothScan() {
