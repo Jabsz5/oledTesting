@@ -14,12 +14,14 @@ export const OLED_TEXT_CHAR_UUID = 'abcd1234-5678-90ab-cdef-1234567890ab';
 export const TEMPERATURE_CHAR_UUID = 'abcd1234-5678-90ab-cdef-1234567890ad';
 export const CAPACITY_CHAR_UUID = 'abcd1234-5678-90ab-cdef-1234567890ae';
 export const PHOTO_CHAR_UUID = "abcd1234-5678-90ab-cdef-1234567890af";
+export const DISPLAY_CONTROL_UUID = 'abcd1234-5678-90ab-cdef-1234567890b0';
 
-const TEMPERATURE_COMMMAND = 5;
+const TEMPERATURE_COMMAND = 5;
 const CAPACITY_COMMAND = 6;
 const UPLOAD_PHOTO_COMMAND = 21;
 const READY_FOR_PHOTO_ACK = 22;
 const LOW_TEMPERATURE_ALERT_F = 60;
+const DISPLAY_SENSOR_DASHBOARD_COMMAND = 42;
 
 function normalizeUUID(uuid) {
   return uuid?.toLowerCase();
@@ -150,7 +152,7 @@ export async function connectToESP32({setBluetoothStatus, setEsp32Status, setCon
         const hasTemperatureCharacteristic = characteristics.some((characteristic) => normalizeUUID(characteristic.uuid) === normalizeUUID(TEMPERATURE_CHAR_UUID));
         const hasCapacityCharacteristic = characteristics.some((characteristic) => normalizeUUID(characteristic.uuid) === normalizeUUID(CAPACITY_CHAR_UUID));
         const hasPhotoCharacteristic = characteristics.some((characteristic) => normalizeUUID(characteristic.uuid) === normalizeUUID(PHOTO_CHAR_UUID));
-
+        const hasDisplayControlCharacteristic = characteristics.some((characteristic) => normalizeUUID(characteristic.uuid) === normalizeUUID(DISPLAY_CONTROL_UUID));
         if (!hasOledTextCharacteristic || !hasTemperatureCharacteristic || !hasCapacityCharacteristic || !hasPhotoCharacteristic) {
           const missingCharacteristics = [];
 
@@ -168,6 +170,10 @@ export async function connectToESP32({setBluetoothStatus, setEsp32Status, setCon
 
           if (!hasPhotoCharacteristic) {
             missingCharacteristics.push('photo');
+          }
+          
+          if (!hasDisplayControlCharacteristic) {
+            missingCharacteristics.push('display control');
           }
 
           const missingText = missingCharacteristics.join(' and ');
@@ -236,6 +242,36 @@ export async function sendTextToOLED({connectedDevice, text, setBluetoothStatus}
     console.log('OLED write error:', error);
     setBluetoothStatus?.('OLED write failed');
     Alert.alert('Write failed', 'Could not send text to the ESP32 OLED characteristic.');
+
+    return false;
+  }
+}
+
+export async function viewCurrentSensorInformation({connectedDevice, setBluetoothStatus,}) {
+  if (!connectedDevice) {
+    Alert.alert('Not connected', 'Connect to the ESP32 first.');
+    return false;
+  }
+
+  try {
+    setBluetoothStatus?.('Requesting sensor dashboard...');
+
+    const commandBase64 = Buffer.from([DISPLAY_SENSOR_DASHBOARD_COMMAND]).toString('base64');
+
+    await connectedDevice.writeCharacteristicWithResponseForService(SMART_CUP_SERVICE_UUID, DISPLAY_CONTROL_UUID, commandBase64);
+
+    console.log('Sent sensor dashboard command: 42');
+    setBluetoothStatus?.('Sensor dashboard command sent');
+
+    return true;
+  } catch (error) {
+    console.log('Display control write error:', error);
+    setBluetoothStatus?.('Sensor dashboard request failed');
+
+    Alert.alert(
+      'Write failed',
+      'Could not send the sensor dashboard command to the ESP32.'
+    );
 
     return false;
   }
@@ -543,7 +579,7 @@ export async function getTemperature({connectedDevice, setBluetoothStatus}) {
     setBluetoothStatus?.('Requesting temperature...');
 
     // Create a single unsigned 8-bit value containing 5.
-    const controlValue = TEMPERATURE_COMMMAND;
+    const controlValue = TEMPERATURE_COMMAND;
     const controlMessageBase64 = Buffer.from([controlValue]).toString('base64');
 
     await connectedDevice.writeCharacteristicWithResponseForService(

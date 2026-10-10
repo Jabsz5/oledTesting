@@ -1,7 +1,8 @@
 import { AlphaType, ColorType, FilterMode, MipmapMode, SkData, Skia, type SkImage, } from '@shopify/react-native-skia';
 import { Buffer } from 'buffer';
 import { Dispatch, SetStateAction } from 'react';
-import type { Device } from 'react-native-ble-plx';
+import { Platform } from 'react-native';
+import { ConnectionPriority, type Device } from 'react-native-ble-plx';
 import { PHOTO_CHAR_UUID, SMART_CUP_SERVICE_UUID } from './bluetooth';
 
 const TARGET_WIDTH = 240;
@@ -38,40 +39,72 @@ async function writePacket(device: Device, serviceUUID: string, characteristicUU
 }
 
 async function sendRGB565Image({device, serviceUUID, characteristicUUID, rgb565,}: SendRGB565Params): Promise<void> {
-  // Requesting 247 gives an ATT payload of up to 244 bytes on Android.
-  const updatedDevice = await device.requestMTU(247);
+  // Must match PHOTO_PACKET_MAX_SIZE in the ESP32 firmware.
+  const ESP32_PACKET_CAPACITY = 517;
 
-  const characteristicCapacity = updatedDevice.mtu - 3;
-
-  // Data packet contains a three-byte protocol header:
-  // packet type + two-byte sequence number.
-  let pixelBytesPerPacket = characteristicCapacity - 3;
-
-  // Keep the payload even so that packets contain complete RGB565 pixels.
-  pixelBytesPerPacket -= pixelBytesPerPacket % 2;
-
-  if (pixelBytesPerPacket < 2) {
-    throw new Error('Negotiated MTU is too small');
-  }
+  const ATT_HEADER_BYTES = 3;
+  const DATA_HEADER_BYTES = 3;
+  const RGB565_BYTES_PER_PIXEL = 2;
 
   const totalBytes = rgb565.length;
-  const totalChunks = Math.ceil(totalBytes / pixelBytesPerPacket);
+  const expectedBytes =
+    TARGET_WIDTH * TARGET_HEIGHT * RGB565_BYTES_PER_PIXEL;
 
-  if (totalChunks > 0xffff) {
-    throw new Error('Too many packets for a 16-bit sequence number');
+  if (totalBytes !== expectedBytes) {
+    throw new Error(
+      `Invalid RGB565 image size: ${totalBytes} bytes, expected ${expectedBytes}`,
+    );
   }
 
-  // START:
-  // type, width, height, total byte count 
-  // total byte count needs to use 4 bytes since the image is 240x320 
-  // and each pixel is 2 bytes, 
-  // so totalBytes = 240 * 320 * 2 = 153600, 
-  // which is larger than 65535 (0xffff) - largest 16-bit number.
+  const updatedDevice = await device.requestMTU(517);
+  const negotiatedMTU = updatedDevice.mtu;
+
+  // At MTU 517:
+  // 517 - 3 ATT header bytes = 514 characteristic bytes.
+  const characteristicCapacity = negotiatedMTU - ATT_HEADER_BYTES;
+
+  // Never exceed either the BLE limit or the ESP32 packet buffer.
+  const packetCapacity = Math.min(
+    characteristicCapacity,
+    ESP32_PACKET_CAPACITY,
+  );
+
+  // 514 - 3 DATA header bytes = 511 available pixel bytes.
+  // Round down to complete RGB565 pixels: 510 bytes.
+  const pixelBytesPerPacket =
+    Math.floor(
+      (packetCapacity - DATA_HEADER_BYTES) / RGB565_BYTES_PER_PIXEL,
+    ) * RGB565_BYTES_PER_PIXEL;
+
+  if (pixelBytesPerPacket < RGB565_BYTES_PER_PIXEL) {
+    throw new Error("Negotiated MTU is too small");
+  }
+
+  const totalChunks = Math.ceil(totalBytes / pixelBytesPerPacket);
+
+  // END stores the total chunk count in two bytes.
+  if (totalChunks > 0xffff) {
+    throw new Error("Too many packets for a 16-bit chunk count");
+  }
+
+  console.log("Negotiated MTU (bytes):", negotiatedMTU);
+  console.log("Characteristic capacity (bytes):", characteristicCapacity);
+  console.log("Packet capacity (bytes):", packetCapacity);
+  console.log("Pixel bytes per DATA packet:", pixelBytesPerPacket);
+  console.log(
+    "Full DATA packet size (bytes):",
+    DATA_HEADER_BYTES + pixelBytesPerPacket,
+  );
+  console.log("Total RGB565 bytes:", totalBytes);
+  console.log("Total DATA packets:", totalChunks);
+
+  // START: type, width[2], height[2], totalBytes[4].
+  // All multi-byte fields are sent high byte first.
+  // 240 × 320 × 2 = 153600 bytes, requiring a four-byte count.
   const startPacket = new Uint8Array(9);
 
   startPacket[0] = PACKET_START;
 
-  // 240 (10) = 0x00F0 (16)
   startPacket[1] = (TARGET_WIDTH >> 8) & 0xff;
   startPacket[2] = TARGET_WIDTH & 0xff;
 
@@ -83,33 +116,90 @@ async function sendRGB565Image({device, serviceUUID, characteristicUUID, rgb565,
   startPacket[7] = (totalBytes >>> 8) & 0xff;
   startPacket[8] = totalBytes & 0xff;
 
-  await writePacket(updatedDevice, serviceUUID, characteristicUUID, startPacket);
+  try {
+  if (Platform.OS === "android") {
+    await updatedDevice.requestConnectionPriority(
+      ConnectionPriority.High,
+    );
+
+    console.log("High connection priority requested");
+  }
+
+  const transferStartedAt = Date.now();
+
+  await writePacket(
+    updatedDevice,
+    serviceUUID,
+    characteristicUUID,
+    startPacket,
+  );
+
+  let nextProgressLog = 10;
 
   for (let sequence = 0; sequence < totalChunks; sequence++) {
     const start = sequence * pixelBytesPerPacket;
     const end = Math.min(start + pixelBytesPerPacket, totalBytes);
     const pixelChunk = rgb565.subarray(start, end);
 
-    const dataPacket = new Uint8Array(3 + pixelChunk.length);
+    const dataPacket = new Uint8Array(
+      DATA_HEADER_BYTES + pixelChunk.length,
+    );
 
     dataPacket[0] = PACKET_DATA;
     dataPacket[1] = (sequence >> 8) & 0xff;
     dataPacket[2] = sequence & 0xff;
-    dataPacket.set(pixelChunk, 3);
+    dataPacket.set(pixelChunk, DATA_HEADER_BYTES);
 
-    // Awaiting prevents packets from being submitted simultaneously.
-    await writePacket(updatedDevice, serviceUUID, characteristicUUID, dataPacket);
+    await writePacket(
+      updatedDevice,
+      serviceUUID,
+      characteristicUUID,
+      dataPacket,
+    );
 
-    const progress = ((end / totalBytes) * 100).toFixed(1);
-    console.log(`Image transfer: ${progress}%`);
+    const progress = (end / totalBytes) * 100;
+
+    if (progress >= nextProgressLog || sequence === totalChunks - 1) {
+      console.log(`Image transfer: ${progress.toFixed(1)}%`);
+      nextProgressLog = (Math.floor(progress / 10) + 1) * 10;
+    }
   }
 
-  const endPacket = new Uint8Array([PACKET_END, (totalChunks >> 8) & 0xff, totalChunks & 0xff,]);
+  const endPacket = new Uint8Array([
+    PACKET_END,
+    (totalChunks >> 8) & 0xff,
+    totalChunks & 0xff,
+  ]);
 
-  await writePacket(updatedDevice, serviceUUID, characteristicUUID, endPacket);
+  await writePacket(
+    updatedDevice,
+    serviceUUID,
+    characteristicUUID,
+    endPacket,
+  );
 
-  console.log('Image transfer complete');
+  const elapsedSeconds = (Date.now() - transferStartedAt) / 1000;
+
+  console.log(
+    `Image packets sent in ${elapsedSeconds.toFixed(2)} seconds`,
+  );
+} finally {
+  // Restore normal priority even if the transfer throws an error.
+  if (Platform.OS === "android") {
+    try {
+      await updatedDevice.requestConnectionPriority(
+        ConnectionPriority.Balanced,
+      );
+
+      console.log("Balanced connection priority requested");
+    } catch (error) {
+      // Preserve the original transfer error if disconnected.
+      console.warn("Could not restore connection priority:", error);
+    }
+  }
 }
+}
+
 
 type SendPhotoToOLEDParams = {
   selectedImage: string;

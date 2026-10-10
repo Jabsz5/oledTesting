@@ -21,6 +21,7 @@ import {
   sendTextToOLED,
   startPhotoUpload,
   stopBluetoothScan,
+  viewCurrentSensorInformation,
   waitForPhotoReady,
 } from '@/scripts/bluetooth';
 
@@ -57,51 +58,30 @@ export default function HomeScreen() {
   const SendTextToOLED = () => {sendTextToOLED({connectedDevice, text: oledText, setBluetoothStatus,});};
   const SendPhotoToOLED = async () => {
 
-  if (!selectedImage) {
-    console.log('No photo selected');
-    return;
-  }
+    if (!selectedImage) {
+      console.log('No photo selected');
+      return;
+    }
 
-  if (!connectedDevice) {
-    setBluetoothStatus(
-      'No ESP32 connected'
-    );
+    if (!connectedDevice) {
+      setBluetoothStatus('No ESP32 connected');
+      return;
+    }
 
-    return;
-  }
+    try {
+      const readyPromise = waitForPhotoReady({connectedDevice, setBluetoothStatus, });
 
-  try {
+      await startPhotoUpload({connectedDevice, setBluetoothStatus,});
+      await readyPromise;
+      await sendPhotoToOLED({selectedImage, connectedDevice, setBluetoothStatus,});
+    } catch (error) {
+      console.error('Photo transfer error:', error);
+      setBluetoothStatus('Photo transfer failed');
+    }
+  };
 
-    const readyPromise =
-      waitForPhotoReady({
-        connectedDevice,
-        setBluetoothStatus,
-      });
-
-    await startPhotoUpload({
-      connectedDevice,
-      setBluetoothStatus,
-    });
-
-    await readyPromise;
-
-    await sendPhotoToOLED({
-      selectedImage,
-      connectedDevice,
-      setBluetoothStatus,
-    });
-
-  } catch (error) {
-
-    console.error(
-      'Photo transfer error:',
-      error
-    );
-
-    setBluetoothStatus(
-      'Photo transfer failed'
-    );
-  }
+  const ViewCurrentSensorInformation = async () => {
+    await viewCurrentSensorInformation({connectedDevice, setBluetoothStatus,});
 };
 
   // Opens the user's photo gallery and lets them select an image.
@@ -201,6 +181,19 @@ export default function HomeScreen() {
           >
             <ThemedText style={styles.buttonText}>
               Send to OLED
+            </ThemedText>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.button,
+              pressed && styles.buttonPressed,
+            ]}
+            onPress={ViewCurrentSensorInformation}
+            accessibilityRole="button"
+          >
+            <ThemedText style={styles.buttonText}>
+              View current sensor information
             </ThemedText>
           </Pressable>
         </ThemedView>
